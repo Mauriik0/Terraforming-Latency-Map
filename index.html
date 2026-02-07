@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>ATLAS // Latência Materializada (v8)</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0a0a0a;color:#fff;font-family:'Inter',sans-serif;overflow:hidden}
+    .container{width:100vw;height:100vh;position:relative}
+    #territory-canvas{width:100%;height:100%;position:absolute;inset:0;cursor:grab}
+    #territory-canvas.dragging{cursor:grabbing}
+    .ui-layer{position:absolute;inset:0;pointer-events:none;z-index:10}
+    .header{position:absolute;top:40px;left:60px}
+    .title{font-size:14px;font-weight:300;letter-spacing:8px;text-transform:uppercase;opacity:.4;margin-bottom:4px}
+    .subtitle{font-size:11px;font-weight:300;letter-spacing:3px;opacity:.3}
+
+    .filters{position:absolute;top:50%;right:60px;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;pointer-events:all}
+    .filter-btn{background:transparent;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.3);
+      padding:14px 24px;font-size:11px;letter-spacing:3px;text-transform:uppercase;cursor:pointer;
+      transition:all .6s cubic-bezier(.4,0,.2,1);font-family:'Inter',sans-serif;font-weight:300;min-width:220px;text-align:left}
+    .filter-btn:hover{border-color:rgba(255,255,255,.3);color:rgba(255,255,255,.6)}
+    .filter-btn.active{border-color:rgba(255,255,255,1);color:rgba(255,255,255,1);background:rgba(255,255,255,.02)}
+
+    .controls{position:absolute;top:120px;left:60px;display:flex;flex-direction:column;gap:14px;pointer-events:all;max-width:380px}
+    .control{background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(20px);
+      padding:12px 14px;border-radius:14px}
+    .control-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .control label{font-size:10px;letter-spacing:2px;opacity:.5;text-transform:uppercase}
+    .control .val{font-size:10px;letter-spacing:2px;opacity:.4;font-variant-numeric:tabular-nums}
+    input[type="range"]{width:180px;accent-color:#fff;opacity:.35;pointer-events:none}
+    .toggle{display:flex;gap:10px;align-items:center;margin-top:10px;opacity:.7}
+    .toggle input{accent-color:#fff}
+    .toggle span{font-size:10px;letter-spacing:2px;text-transform:uppercase;opacity:.55}
+
+    .status{position:absolute;bottom:40px;left:60px;font-size:10px;font-weight:300;letter-spacing:2px;opacity:.3}
+    .legend{position:absolute;top:40px;right:60px;opacity:.3;font-size:10px;letter-spacing:2px;line-height:2}
+    .legend-item{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+    .legend-color{width:20px;height:2px;opacity:.6}
+
+    .info-panel{position:absolute;bottom:40px;left:50%;transform:translateX(-50%);width:min(760px,calc(100vw - 120px));
+      padding:18px 20px;background:rgba(0,0,0,.38);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(20px);
+      opacity:0;transition:opacity .6s cubic-bezier(.4,0,.2,1);pointer-events:none;border-radius:18px}
+    .info-panel.visible{opacity:1}
+    .info-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+    .info-title{font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;opacity:.92}
+    .info-meta{font-size:10px;letter-spacing:2px;opacity:.5;text-transform:uppercase;margin-top:8px;line-height:1.8}
+    .info-text{margin-top:12px;font-size:11px;font-weight:300;line-height:1.8;opacity:.68}
+    .pillrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+    .pill{border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:7px 10px;font-size:10px;letter-spacing:2px;opacity:.55;text-transform:uppercase}
+    .coordinates{position:absolute;top:40px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:300;letter-spacing:4px;opacity:.2;
+      pointer-events:none;font-variant-numeric:tabular-nums}
+
+    .vignette{position:absolute;inset:-20%;transition:background 0.35s ease;background:radial-gradient(closest-side, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 70%, rgba(0,0,0,.65) 100%);
+      pointer-events:none;mix-blend-mode:multiply}
+  
+    /* ===== Mercado (widget sistêmico) ===== */
+    .market-widget{
+      position:absolute;top:320px;width:240px;
+      padding:14px 14px 12px 14px;
+      background:rgba(0,0,0,.34);
+      border:1px solid rgba(255,255,255,.08);
+      backdrop-filter:blur(18px);
+      border-radius:16px;
+      pointer-events:none;
+      z-index:12;
+      box-shadow:0 10px 30px rgba(0,0,0,.25);
+      opacity:.92;
+    }
+    .mw-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+    .mw-kicker{font-size:9px;letter-spacing:4px;opacity:.35;text-transform:uppercase}
+    .mw-title{font-size:10px;letter-spacing:3px;opacity:.55;text-transform:uppercase}
+    .mw-row{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+    .mw-state{font-size:10px;letter-spacing:2px;opacity:.75;text-transform:uppercase}
+    .mw-val{font-size:10px;letter-spacing:2px;opacity:.45;font-variant-numeric:tabular-nums}
+    .mw-bar{position:relative;height:6px;border-radius:999px;margin-top:10px;
+      background:rgba(255,255,255,.06);overflow:hidden}
+    .mw-fill{position:absolute;left:0;top:0;bottom:0;width:50%;
+      background:linear-gradient(90deg, rgba(255,255,255,.18), rgba(255,255,255,.55));
+      opacity:.9}
+    .mw-spark{display:block;width:100%;height:34px;margin-top:10px;opacity:.65}
+    .mw-note{margin-top:8px;font-size:9px;letter-spacing:2px;opacity:.28;text-transform:uppercase;line-height:1.4}
+
+  
+    .mw-companies{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
+    .mw-c-title{font-size:9px;letter-spacing:3px;opacity:.4;margin-bottom:6px}
+    .mw-c-row{font-size:9px;letter-spacing:1.5px;opacity:.6;display:flex;justify-content:space-between}
+    .mw-c-row b{font-weight:600;opacity:.9}
+    .mw-c-note{margin-top:6px;font-size:8px;letter-spacing:2px;opacity:.3;text-transform:uppercase}
+
+
+    .zoom-controls{
+      position:absolute;
+      bottom:40px;
+      left:60px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      z-index:20;
+      pointer-events:all;
+    }
+    .zoom-controls button{
+      width:34px;height:34px;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.2);
+      background:rgba(0,0,0,.4);
+      color:#fff;
+      font-size:18px;
+      cursor:pointer;
+    }
+
+
+    .hint-badge{
+      position:absolute;
+      top:40px;
+      left:50%;
+      transform:translateX(-50%);
+      z-index:15;
+      pointer-events:none;
+      font-size:9px;
+      letter-spacing:3px;
+      text-transform:uppercase;
+      opacity:.28;
+      padding:8px 10px;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:999px;
+      background:rgba(0,0,0,.25);
+      backdrop-filter:blur(14px);
+      white-space:nowrap;
+    }
+</style>
+
+</head>
+<body>
+<div class="container">
+  <canvas id="territory-canvas"></canvas>
+
+  <div class="ui-layer">
+    <div class="header">
+      <div class="title">ATLAS</div>
+      <div class="subtitle">Latência Materializada</div>
+    </div>
+
+    <!-- Mercado: indicador sistêmico (não interativo) -->
+    <div class="market-widget" id="marketWidget" aria-hidden="true">
+      <div class="mw-top">
+        <div class="mw-kicker">MERCADO</div>
+        <div class="mw-title">CAPEX / INFRA IA</div>
+      </div>
+      <div class="mw-row">
+        <div class="mw-state" id="mwState">ESTÁVEL</div>
+        <div class="mw-val" id="mwVal">0.50</div>
+      </div>
+      <div class="mw-bar">
+        <div class="mw-fill" id="mwFill"></div>
+      </div>
+      <canvas class="mw-spark" id="mwSpark" width="220" height="34"></canvas>
+
+      <div class="mw-companies">
+        <div class="mw-c-title">CADEIA DE EXTRAÇÃO (estimado)</div>
+        <div class="mw-c-row"><b>Glencore</b> • Mineração • <span>≈3.1 TWh</span></div>
+        <div class="mw-c-row"><b>Vale Base Metals</b> • Minerais • <span>≈1.7 TWh</span></div>
+        <div class="mw-c-row"><b>Siemens Energy</b> • Infraestrutura • <span>≈2.5 TWh</span></div>
+        <div class="mw-c-row"><b>EDP Renováveis</b> • Energia • <span>≈1.3 TWh</span></div>
+        <div class="mw-c-note">Dados e energia de usuários alimentam IA (~40%)</div>
+      </div>
+      <div class="mw-note">Verde acelera extração • Vermelho contrai</div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-color" style="background:#ffffff;"></div><span>Oficial</span></div>
+      <div class="legend-item"><div class="legend-color" style="background:#888888;"></div><span>Parcial</span></div>
+      <div class="legend-item"><div class="legend-color" style="background:#333333;"></div><span>Ausente</span></div>
+    </div>
+
+    <div class="hint-badge" id="hintBadge">ARRASTE PARA NAVEGAR • SCROLL PARA ZOOM • CLIQUE EM UM NÓ PARA FIXAR</div>
+
+    <div class="coordinates" id="coordinates">00°00'00"N  000°00'00"E</div>
+
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">Território Completo</button>
+      <button class="filter-btn" data-filter="energia">Energia</button>
+      <button class="filter-btn" data-filter="agua">Água</button>
+      <button class="filter-btn" data-filter="minerais">Minerais</button>
+      <button class="filter-btn" data-filter="ewaste">E-waste</button>
+      <button class="filter-btn" data-filter="latencia">Latência</button>
+      <button class="filter-btn" data-filter="governanca">Governança</button>
+      <button class="filter-btn" data-filter="ausencia">Ausências</button>
+    </div>
+
+    <div class="info-panel" id="infoPanel">
+      <div class="info-top">
+        <div>
+          <div class="info-title" id="infoTitle"></div>
+          <div class="info-meta" id="infoMeta"></div>
+        </div>
+        <div style="text-align:right">
+          <div class="info-title" style="font-weight:300;opacity:.6" id="infoStatus"></div>
+          <div class="info-meta" id="infoDoc"></div>
+        </div>
+      </div>
+      <div class="info-text" id="infoText"></div>
+      <div class="pillrow" id="pillRow"></div>
+    </div>
+
+    <div class="status"><span id="statusText">ATLAS EM MODO: TERRITÓRIO COMPLETO</span></div>
+
+    <div class="controls">
+      <div class="control">
+        <div class="control-row">
+          <label>Exposição</label>
+          <div class="val" id="expVal">1.00×</div>
+        </div>
+        <div class="control-row" style="margin-top:10px">
+          <input id="exposure" type="range" min="0.4" max="2.6" value="1.0" step="0.05" />
+          <div class="val" style="min-width:70px;text-align:right;opacity:.35">densidade</div>
+        </div>
+        <div class="toggle">
+          <input id="autoSweep" type="checkbox" />
+          <span>Auto-narrativa</span>
+        </div>
+      </div>
+
+      <div class="control">
+        <div class="control-row">
+          <label>Memória (impacto ambiental)</label>
+          <div class="val" id="memVal">0.86</div>
+        </div>
+        <div class="control-row" style="margin-top:10px">
+          <input id="memory" type="range" min="0.72" max="0.96" value="0.86" step="0.01" />
+          <div class="val" style="min-width:70px;text-align:right;opacity:.35">rastro</div>
+        </div>
+
+      </div>
+    </div>
+
+    
+    <div class="zoom-controls">
+      <button id="zoomIn">＋</button>
+      <button id="zoomOut">－</button>
+    </div>
+    <div class="vignette" id="vignette"></div>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('territory-canvas');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+
+  let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let width = window.innerWidth;
+  let height = window.innerHeight;
+
+  // ===== Camera (pan & zoom) =====
+  let camX = 0, camY = 0;
+  let zoom = 1;
+  let isDragging = false;
+  let dragStartX = 0, dragStartY = 0;
+  let camStartX = 0, camStartY = 0;
+
+  function worldFromScreen(sx, sy){ return { x: (sx - camX) / zoom, y: (sy - camY) / zoom }; }
+  function applyCamera(){ ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, camX * dpr, camY * dpr); }
+  function resetTransform(){ ctx.setTransform(dpr,0,0,dpr,0,0); }
+
+  function resizeCanvas() {
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    resetTransform();
+    rebuildCaches(true);
+    init();
+  }
+  window.addEventListener('resize', resizeCanvas, { passive: true });
+
+  // ===== Dados (nós) =====
+  const territories = [
+    { x:0.45, y:0.28, resource:'energia', axis:'grid', status:'oficial', region:'Dublin', magnitude:0.90, papers:6,
+      doc:'CRU Decision Paper (Dec 2025)', source:'CRU / CSO', year:2025,
+      notes:'Data centers chegaram a ~22% do consumo elétrico nacional (2024) e houve moratória de facto em Dublin (2021–2025). Nova política condiciona conexões a critérios rígidos (geração dispatchable equivalente ao MIC).',
+      fieldRadius:420, fieldStrength:1.55 },
+    { x:0.47, y:0.30, resource:'governanca', axis:'zoneamento', status:'oficial', region:'Amsterdam', magnitude:0.88, papers:5,
+      doc:'Ban municipal / cap 670 MVA (Abr 2025)', source:'Município de Amsterdam', year:2025,
+      notes:'Moratória (2019) → restrições (2023) → banimento permanente e limite de capacidade até 2030.',
+      fieldRadius:380, fieldStrength:1.35 },
+    { x:0.48, y:0.32, resource:'energia', axis:'fila de conexão', status:'parcial', region:'Frankfurt', magnitude:0.92, papers:6,
+      doc:'Investigações + setor (2025)', source:'AlgorithmWatch / setor', year:2025,
+      notes:'Concentração de data centers + gargalo de rede; fila de conexão reportada em anos. Expansões recorrem a geração local por limitação de grid.',
+      fieldRadius:440, fieldStrength:1.45 },
+    { x:0.49, y:0.31, resource:'agua', axis:'mensuração', status:'parcial', region:'Hollands Kroon', magnitude:0.76, papers:4,
+      doc:'Dados municipais vs declarações (2022+)', source:'Município / imprensa especializada', year:2022,
+      notes:'Conflito documental sobre volume real de água usado por data centers; múltiplas versões publicadas/retificadas, sem auditoria independente.',
+      fieldRadius:360, fieldStrength:1.15 },
+    { x:0.77, y:0.58, resource:'governanca', axis:'moratória', status:'oficial', region:'Singapore', magnitude:0.86, papers:5,
+      doc:'Green DC Roadmap (2024) + DC-CFA2 (2025)', source:'IMDA / MTI', year:2025,
+      notes:'Moratória (2019–2022) por limites de energia/água/terra. Retomada com critérios (PUE, energia verde, eficiência).',
+      fieldRadius:420, fieldStrength:1.35 },
+    { x:0.28, y:0.72, resource:'minerais', axis:'lítio', status:'parcial', region:'Salar de Atacama', magnitude:0.95, papers:6,
+      doc:'Relatórios + peer-reviewed (2024–2025)', source:'SMA/CORFO + literatura', year:2025,
+      notes:'Conflitos socioambientais e pressão hídrica associados à extração de lítio; impactos aparecem como cadeia material, raramente atribuídos diretamente à “IA” como categoria isolada.',
+      fieldRadius:520, fieldStrength:1.50 },
+    { x:0.52, y:0.74, resource:'minerais', axis:'cobalto', status:'oficial', region:'RDC / Copperbelt', magnitude:0.88, papers:5,
+      doc:'USGS MCS (2025) + relatórios', source:'USGS / AfDB', year:2025,
+      notes:'Produção global concentrada; relação com infraestrutura digital ocorre por encadeamento material (baterias/eletrônicos) e não por rastreio direto de “IA”.',
+      fieldRadius:480, fieldStrength:1.25 },
+    { x:0.46, y:0.58, resource:'ewaste', axis:'descarte', status:'oficial', region:'Global / E-waste', magnitude:0.70, papers:4,
+      doc:'Global E-waste Monitor (2024)', source:'UNITAR/ITU', year:2024,
+      notes:'E-waste cresce e a reciclagem formal permanece limitada; não há categoria específica para hardware de IA em frameworks globais.',
+      fieldRadius:620, fieldStrength:1.20 },
+    { x:0.15, y:0.38, resource:'latencia', axis:'hub', status:'parcial', region:'Virginia', magnitude:0.92, papers:6,
+      doc:'Setor + análises técnicas', source:'setor / análises', year:2025,
+      notes:'Hubs de baixa latência concentram infraestrutura por proximidade de backbone/IXPs; latência atua como condição técnica de localização.',
+      fieldRadius:520, fieldStrength:1.25 },
+    { x:0.24, y:0.38, resource:'latencia', axis:'hub', status:'parcial', region:'Silicon Valley', magnitude:0.95, papers:6,
+      doc:'Setor + análises técnicas', source:'setor / análises', year:2025,
+      notes:'Concentração de capacidade de computação e rede; a demanda por “tempo real” desloca pressão para energia e refrigeração.',
+      fieldRadius:520, fieldStrength:1.25 },
+    { x:0.44, y:0.27, resource:'agua', axis:'ausente', status:'ausente', region:'Ireland / Água', magnitude:0.55, papers:0,
+      doc:'Dados indisponíveis', source:'—', year:2026,
+      notes:'Não há publicação agregada de consumo hídrico por data centers em registros públicos consultados; ausência é evidência estrutural.',
+      fieldRadius:560, fieldStrength:1.40 },
+    
+    // ===== NOVOS DADOS - EXPANSÃO EUROPA =====
+    { x:0.495, y:0.32, resource:'energia', axis:'grid', status:'oficial', region:'Reino Unido (Londres)', magnitude:2.6, papers:73,
+      doc:'Datacenter Industry Reports (2025)', source:'Synergy Research / UK Gov', year:2025,
+      notes:'Londres concentra centenas de data centers com consumo energético crescente 12% ao ano.',
+      fieldRadius:440, fieldStrength:1.50 },
+    { x:0.51, y:0.345, resource:'energia', axis:'expansão', status:'oficial', region:'França (Paris)', magnitude:2.4, papers:68,
+      doc:'Relatórios setoriais franceses', source:'ARCEP / setor', year:2025,
+      notes:'Data centers parisienses em expansão; consumo projetado de 3.8 TWh até 2026.',
+      fieldRadius:420, fieldStrength:1.45 },
+    { x:0.488, y:0.38, resource:'energia', axis:'investimento', status:'oficial', region:'Espanha (Madrid)', magnitude:2.1, papers:47,
+      doc:'Relatórios de investimento', source:'setor / CNMC', year:2025,
+      notes:'Investimentos em data centers crescem 18% ao ano; capacidade de 800 MW.',
+      fieldRadius:400, fieldStrength:1.35 },
+    { x:0.53, y:0.37, resource:'energia', axis:'eficiência', status:'oficial', region:'Itália (Milão)', magnitude:1.9, papers:42,
+      doc:'Análises setoriais italianas', source:'setor / AgID', year:2025,
+      notes:'Milão expande infraestrutura digital com foco em eficiência energética.',
+      fieldRadius:380, fieldStrength:1.30 },
+    { x:0.54, y:0.26, resource:'energia', axis:'renovável', status:'oficial', region:'Suécia (Brookfield)', magnitude:2.3, papers:51,
+      doc:'Projeto Brookfield', source:'Brookfield / relatórios', year:2025,
+      notes:'Projeto de bilhões de dólares para data center com energia renovável para IA.',
+      fieldRadius:410, fieldStrength:1.40 },
+    
+    // ===== NOVOS DADOS - EXPANSÃO AMÉRICA LATINA =====
+    { x:0.35, y:0.68, resource:'energia', axis:'concentração', status:'oficial', region:'Brasil (São Paulo)', magnitude:2.4, papers:56,
+      doc:'Relatórios ABRADEE / setor', source:'ABRADEE / setor', year:2025,
+      notes:'São Paulo concentra 40% dos data centers brasileiros; consumo de 2.1 TWh anuais.',
+      fieldRadius:450, fieldStrength:1.45 },
+    { x:0.36, y:0.71, resource:'agua', axis:'expansão', status:'parcial', region:'Brasil (Rio)', magnitude:2.0, papers:38,
+      doc:'Análises ambientais', source:'setor / imprensa', year:2025,
+      notes:'Infraestrutura em expansão com preocupações hídricas e energéticas.',
+      fieldRadius:390, fieldStrength:1.25 },
+    { x:0.25, y:0.48, resource:'energia', axis:'hub', status:'oficial', region:'México (Querétaro)', magnitude:2.1, papers:44,
+      doc:'Relatórios setoriais México', source:'setor / CFE', year:2025,
+      notes:'Querétaro é hub de data centers com crescimento de 22% ao ano.',
+      fieldRadius:400, fieldStrength:1.35 },
+    { x:0.29, y:0.82, resource:'energia', axis:'renovável', status:'oficial', region:'Chile (Santiago)', magnitude:1.9, papers:39,
+      doc:'Análises energéticas Chile', source:'CNE / setor', year:2025,
+      notes:'Data centers em expansão; Chile lidera energia renovável na região.',
+      fieldRadius:380, fieldStrength:1.30 },
+    { x:0.28, y:0.78, resource:'minerais', axis:'cobre', status:'oficial', region:'Chile (Norte)', magnitude:3.4, papers:92,
+      doc:'USGS / COCHILCO (2025)', source:'USGS / COCHILCO', year:2025,
+      notes:'Produz 28% do cobre mundial; essencial para infraestrutura de IA e energia.',
+      fieldRadius:540, fieldStrength:1.60 },
+    { x:0.30, y:0.71, resource:'minerais', axis:'cobre', status:'oficial', region:'Peru (Mineração)', magnitude:3.1, papers:78,
+      doc:'USGS / Ministerio Energía', source:'USGS / Peru Gov', year:2025,
+      notes:'Segundo maior produtor de cobre; infraestrutura mineral alimenta cadeia global de IA.',
+      fieldRadius:500, fieldStrength:1.50 },
+    { x:0.295, y:0.58, resource:'energia', axis:'conectividade', status:'oficial', region:'Colômbia (Bogotá)', magnitude:1.8, papers:35,
+      doc:'Relatórios setor Colômbia', source:'setor / MinTIC', year:2025,
+      notes:'Crescimento de infraestrutura digital; investimentos de operadores globais.',
+      fieldRadius:370, fieldStrength:1.25 },
+    
+    // ===== NOVOS DADOS - EXPANSÃO ÁSIA-PACÍFICO =====
+    { x:0.70, y:0.41, resource:'energia', axis:'massiva', status:'parcial', region:'China (Beijing)', magnitude:3.8, papers:156,
+      doc:'Análises China infraestrutura', source:'setor / análises', year:2025,
+      notes:'Infraestrutura massiva de IA; consumo energético de data centers > 5% da rede nacional.',
+      fieldRadius:580, fieldStrength:1.70 },
+    { x:0.645, y:0.50, resource:'energia', axis:'expansão rápida', status:'oficial', region:'Índia (Mumbai)', magnitude:2.9, papers:84,
+      doc:'Relatórios India DC', source:'setor / gov India', year:2025,
+      notes:'Expansão rápida de data centers; consumo energético cresce 25% ao ano.',
+      fieldRadius:480, fieldStrength:1.50 },
+    { x:0.78, y:0.38, resource:'energia', axis:'eficiência', status:'oficial', region:'Japão (Tóquio)', magnitude:2.7, papers:76,
+      doc:'Relatórios Japão infraestrutura', source:'METI / setor', year:2025,
+      notes:'Infraestrutura densa; eficiência energética avançada em data centers.',
+      fieldRadius:460, fieldStrength:1.45 },
+    { x:0.82, y:0.80, resource:'energia', axis:'renovável', status:'oficial', region:'Austrália (Sydney)', magnitude:2.3, papers:53,
+      doc:'Análises Australia DC', source:'setor / AEMO', year:2025,
+      notes:'Data centers em crescimento; foco em energia renovável (solar/eólica).',
+      fieldRadius:420, fieldStrength:1.40 },
+  ];
+
+  let nodes = territories.map((t, idx) => ({ ...t, id: idx, wx: t.x*width, wy: t.y*height }));
+
+  function statusToTone(status){
+    const s = (status||'').toLowerCase();
+    if (s.includes('oficial')) return 1.0;
+    if (s.includes('parcial') || s.includes('limitado') || s.includes('forte')) return 0.55;
+    return 0.25;
+  }
+
+  // ===== UI =====
+  let time = 0;
+  let activeLens = 'all';     // lens = what becomes legible
+  let selectedNodeId = null; // click node to lock source/sink
+  let mouseSX = width/2, mouseSY = height/2;
+
+  const exposureEl = document.getElementById('exposure');
+  const memoryEl = document.getElementById('memory');
+  const expValEl = document.getElementById('expVal');
+  const memValEl = document.getElementById('memVal');
+  const autoSweepEl = document.getElementById('autoSweep');
+    const hintBadge = document.getElementById('hintBadge');
+  let exposure = parseFloat(exposureEl.value);
+  let memory = parseFloat(memoryEl.value);
+
+  // ===== AUTO-DRIVEN WIDGETS (no user control) =====
+  const lensTargets = {
+    // Quanto mais agressiva a leitura, maior o valor
+    all:        { exp: 1.60, mem: 0.82 }, // Reduzido de 0.95 para 0.82 - muito mais escuro
+    energia:    { exp: 1.45, mem: 0.90 },
+    agua:       { exp: 1.40, mem: 0.94 },
+    minerais:   { exp: 1.50, mem: 0.92 },
+    latencia:   { exp: 1.35, mem: 0.88 },
+    governanca: { exp: 1.10, mem: 0.85 },
+    ewaste:     { exp: 1.30, mem: 0.96 },
+    ausencia:   { exp: 0.85, mem: 0.80 } // baixa visibilidade, não baixa gravidade
+  };
+  let expTarget = exposure;
+  let memTarget = memory;
+
+  function setTargetsFromLens(){
+    const t = lensTargets[activeLens] || lensTargets.all;
+    expTarget = t.exp;
+    memTarget = t.mem;
+  }
+
+  // ===== Market =====
+  const mwState = document.getElementById('mwState');
+  const mwVal = document.getElementById('mwVal');
+  const mwFill = document.getElementById('mwFill');
+  const mwSpark = document.getElementById('mwSpark');
+  const mwCtx = mwSpark.getContext('2d');
+  let market = 0.50;
+  let marketTarget = 0.50;
+  const marketHistory = new Array(64).fill(market);
+
+  function marketStep(){
+    if (Math.random() < 0.02) marketTarget = Math.random();
+    market += (marketTarget - market) * 0.012 + (Math.random()-0.5)*0.004;
+    market = Math.max(0, Math.min(1, market));
+    marketHistory.push(market);
+    if (marketHistory.length > 64) marketHistory.shift();
+  }
+  function marketLabel(v){
+    if (v >= 0.62) return 'EXPANSÃO';
+    if (v <= 0.38) return 'CONTRAÇÃO';
+    return 'ESTÁVEL';
+  }
+  function renderMarketUI(){
+    mwState.textContent = marketLabel(market);
+    mwVal.textContent = market.toFixed(2);
+    mwFill.style.width = Math.round(market * 100) + '%';
+
+    mwCtx.clearRect(0,0,mwSpark.width,mwSpark.height);
+    mwCtx.globalAlpha = 0.9;
+    mwCtx.lineWidth = 1.2;
+    mwCtx.strokeStyle = 'rgba(255,255,255,.55)';
+    mwCtx.beginPath();
+    for (let i=0;i<marketHistory.length;i++){
+      const v = marketHistory[i];
+      const x = (i/(marketHistory.length-1)) * (mwSpark.width-2) + 1;
+      const y = (1 - v) * (mwSpark.height-6) + 3;
+      if (i===0) mwCtx.moveTo(x,y); else mwCtx.lineTo(x,y);
+    }
+    mwCtx.stroke();
+    const xNow = mwSpark.width - 2;
+    const yNow = (1 - market) * (mwSpark.height-6) + 3;
+    mwCtx.fillStyle = 'rgba(255,255,255,.9)';
+    mwCtx.beginPath();
+    mwCtx.arc(xNow, yNow, 1.7, 0, Math.PI*2);
+    mwCtx.fill();
+  }
+
+  // ===== Chain logic: everything is always active; lens changes visibility =====
+  const sinks = {
+    europa: () => nodes.filter(n => ['Dublin','Frankfurt','Amsterdam'].includes(n.region)),
+    latencia: () => nodes.filter(n => n.resource === 'latencia'),
+    ewaste:  () => nodes.filter(n => n.resource === 'ewaste')
+  };
+  const sources = {
+    energia: () => nodes.filter(n => n.resource === 'energia'),
+    agua:    () => nodes.filter(n => n.resource === 'agua'),
+    minerais:() => nodes.filter(n => n.resource === 'minerais'),
+    usuarios:() => [{ id:'users', wx: width*0.62, wy: height*0.88, resource:'dados', status:'parcial', magnitude:0.85 }]
+  };
+
+  function getVisibilityWeights(){
+    // weights per source-type
+    const low = 0.12, mid = 0.28, high = 1.0;
+    if (activeLens === 'energia') return { energia: high, agua: low, minerais: low, dados: low, ewaste: low, latencia: mid, governanca: mid };
+    if (activeLens === 'agua')    return { energia: low,  agua: high, minerais: low, dados: low, ewaste: low, latencia: mid, governanca: mid };
+    if (activeLens === 'minerais')return { energia: low,  agua: low,  minerais: high,dados: low, ewaste: mid, latencia: mid, governanca: low };
+    if (activeLens === 'latencia')return { energia: mid,  agua: mid,  minerais: mid, dados: high,ewaste: low, latencia: high, governanca: mid };
+    if (activeLens === 'governanca')return{ energia: mid, agua: mid,  minerais: low, dados: low, ewaste: low, latencia: mid, governanca: high };
+    if (activeLens === 'ewaste')  return { energia: low,  agua: low,  minerais: mid, dados: low, ewaste: high,latencia: mid, governanca: low };
+    if (activeLens === 'ausencia')return { energia: 0,    agua: 0,    minerais: 0,   dados: 0,  ewaste: 0,  latencia: 0,  governanca: 0 };
+    return { energia: 0.75, agua: 0.75, minerais: 0.75, dados: 0.75, ewaste: 0.55, latencia: 0.75, governanca: 0.55 };
+  }
+
+  function getActivePairs(){
+    // Always-on pairs (argument): sources -> (europa + latencia)
+    let src = []
+      .concat(sources.energia(), sources.agua(), sources.minerais(), sources.usuarios());
+    let dst = [].concat(sinks.europa(), sinks.latencia());
+
+    // ewaste is a "reverse" accumulation overlay: (europa+latencia) -> ewaste
+    const revSrc = [].concat(sinks.europa(), sinks.latencia());
+    const revDst = sinks.ewaste();
+
+    // Selection narrows (but doesn't turn off the rest; just makes one chain dominant)
+    if (selectedNodeId !== null){
+      const sel = nodes.find(n => n.id === selectedNodeId);
+      if (sel){
+        if (sel.resource === 'energia' || sel.resource === 'governanca' || sel.resource === 'latencia'){
+          dst = [sel];
+        } else if (sel.resource === 'ewaste'){
+          // lock sink to ewaste
+          dst = [sel];
+        } else {
+          src = [sel];
+        }
+      }
+    }
+
+    const uniq = (arr) => {
+      const out = []; const seen = new Set();
+      for (const a of arr){ const k = String(a.id); if (seen.has(k)) continue; seen.add(k); out.push(a); }
+      return out;
+    };
+
+    return {
+      forward: { sources: uniq(src), sinks: uniq(dst) },
+      reverse: { sources: uniq(revSrc), sinks: uniq(revDst) }
+    };
+  }
+
+  // ===== Nature weakening (water/minerals as loss) =====
+  const health = new Map();
+  function getHealth(id){ if (!health.has(id)) health.set(id, 1.0); return health.get(id); }
+  function damage(id, amt){ health.set(id, Math.max(0.05, getHealth(id) - amt)); }
+  function recoverAll(){
+        const r = (1 - memory) * 0.0025;
+    for (const [id, h] of health.entries()) health.set(id, Math.min(1.0, h + r));
+  }
+
+  // ===== Caches =====
+  const fieldCanvas = document.createElement('canvas');
+  const fieldCtx = fieldCanvas.getContext('2d');
+  const connCanvas = document.createElement('canvas');
+  const connCtx = connCanvas.getContext('2d');
+  let cachesDirty = true;
+  let connDirty = true;
+
+  function rebuildCaches(force=false){
+    connDirty = true; cachesDirty = true;
+    if (force){
+      fieldCanvas.width = Math.floor(width * dpr);
+      fieldCanvas.height = Math.floor(height * dpr);
+      fieldCtx.setTransform(dpr,0,0,dpr,0,0);
+      connCanvas.width = Math.floor(width * dpr);
+      connCanvas.height = Math.floor(height * dpr);
+      connCtx.setTransform(dpr,0,0,dpr,0,0);
+    }
+  }
+
+  function matchFilter(t){
+    if (activeLens === 'all') return true;
+    if (activeLens === 'ausencia') return t.status === 'ausente';
+    if (activeLens === 'governanca') return t.resource === 'governanca';
+    return t.resource === activeLens;
+  }
+
+  function drawDominanceFieldCached(){
+    if (!cachesDirty){ ctx.drawImage(fieldCanvas, 0, 0, width, height); return; }
+    cachesDirty = false;
+    fieldCtx.clearRect(0,0,width,height);
+
+    const alphaBase =
+      activeLens === 'all' ? 0.04 :
+      activeLens === 'ausencia' ? 0.07 :
+      0.06;
+
+    for (const t of nodes){
+      if (!matchFilter(t)) continue;
+      const x = t.wx, y = t.wy;
+      const R = (t.fieldRadius||380) * (0.75 + exposure*0.15);
+      const tone = statusToTone(t.status);
+      const strength = (t.fieldStrength||1.0);
+      const a0 = alphaBase * tone * strength;
+
+      const g = fieldCtx.createRadialGradient(x,y,0,x,y,R);
+      g.addColorStop(0, `rgba(255,255,255,${a0})`);
+      g.addColorStop(0.5, `rgba(255,255,255,${a0*0.35})`);
+      g.addColorStop(1, `rgba(255,255,255,0)`);
+      fieldCtx.fillStyle = g;
+      fieldCtx.beginPath();
+      fieldCtx.arc(x,y,R,0,Math.PI*2);
+      fieldCtx.fill();
+    }
+    ctx.drawImage(fieldCanvas, 0, 0, width, height);
+  }
+
+  function drawConnectionsMaybe(){
+    if (connDirty || cachesDirty){
+      connDirty = false;
+      connCtx.clearRect(0,0,width,height);
+
+      const base = (activeLens === 'all') ? 0.022 : 0.045;
+      connCtx.strokeStyle = `rgba(255,255,255,${base})`;
+      connCtx.lineWidth = 0.6;
+
+      for (let i=0;i<nodes.length;i++){
+        for (let j=i+1;j<nodes.length;j++){
+          const t1 = nodes[i], t2 = nodes[j];
+          const link =
+            (t1.resource === 'latencia' && t2.resource === 'energia') ||
+            (t1.resource === 'energia' && t2.resource === 'agua') ||
+            (t1.resource === 'minerais' && t2.resource === 'ewaste') ||
+            (t1.resource === 'governanca' && t2.resource === 'energia');
+          if (!link) continue;
+          const relevant = matchFilter(t1) || matchFilter(t2) || activeLens === 'all';
+          if (!relevant) continue;
+          connCtx.beginPath();
+          connCtx.moveTo(t1.wx,t1.wy);
+          connCtx.lineTo(t2.wx,t2.wy);
+          connCtx.stroke();
+        }
+      }
+      ctx.drawImage(connCanvas, 0, 0, width, height);
+      return;
+    }
+    ctx.drawImage(connCanvas, 0, 0, width, height);
+  }
+
+  // ===== Sprite =====
+  const haloSprite = document.createElement('canvas');
+  const hs = haloSprite.getContext('2d');
+  (function buildHaloSprite(){
+    const s = 64;
+    haloSprite.width = s; haloSprite.height = s;
+    const g = hs.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+    g.addColorStop(0,'rgba(255,255,255,.28)');
+    g.addColorStop(0.4,'rgba(255,255,255,.12)');
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    hs.fillStyle = g;
+    hs.beginPath(); hs.arc(s/2,s/2,s/2,0,Math.PI*2); hs.fill();
+  })();
+
+  // ===== Particles =====
+  class Particle {
+    constructor(node){
+      this.n = node;
+      this.x = node.wx; this.y = node.wy;
+      this.baseX = this.x; this.baseY = this.y;
+      this.vx = 0; this.vy = 0;
+      this.opacity = 0;
+      this.seed = Math.random()*9999;
+    }
+    getTargetOpacity(){
+      if (activeLens === 'all') return 0.7;
+      if (activeLens === this.n.resource) return 1.0;
+      if (activeLens === 'ausencia' && this.n.status === 'ausente') return 1.0;
+      if (activeLens === 'governanca' && this.n.resource === 'governanca') return 1.0;
+      return 0.08;
+    }
+    update(){
+      const marketBoost = 0.72 + market * 0.50;
+      const h = (this.n.id !== undefined) ? getHealth(this.n.id) : 1.0;
+      const weakFactor = (this.n.resource === 'agua' || this.n.resource === 'minerais') ? (0.35 + 0.65*h) : 1.0;
+      this.opacity += ((this.getTargetOpacity() * marketBoost * weakFactor) - this.opacity) * 0.06;
+    }
+    draw(){
+      if (this.opacity < 0.01) return;
+      const tone = statusToTone(this.n.status);
+      const a = this.opacity * tone;
+      const haloScale = (0.9 + (this.n.magnitude||0.8)*0.9) * (activeLens==='all' ? 1.0 : 1.15);
+      const hsSize = 42 * haloScale;
+      ctx.globalAlpha = Math.min(0.65, a * 0.45); // aumentado de 0.55 e 0.35 para 0.65 e 0.45
+      ctx.drawImage(haloSprite, this.n.wx - hsSize/2, this.n.wy - hsSize/2, hsSize, hsSize);
+
+      ctx.globalAlpha = Math.min(1.0, a);
+      ctx.fillStyle = 'rgba(255,255,255,1)';
+      ctx.beginPath();
+      ctx.arc(this.n.wx,this.n.wy, 1 + (this.n.magnitude||0.8)*3.0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
+  let particles = [];
+  function initCores(){
+    particles = [];
+    const mult = Math.max(8, Math.floor(10 * exposure));
+    for (const n of nodes){
+      const count = (n.status === 'ausente' ? Math.floor(mult*0.75) : mult);
+      for (let i=0;i<count;i++) particles.push(new Particle(n));
+    }
+  }
+
+  // ===== Ambient =====
+  let ambient = [];
+  function initAmbient(){
+    const baseCount = Math.floor(900 * exposure);
+    ambient = [];
+    for (let i=0;i<baseCount;i++){
+      ambient.push({ x: Math.random()*width, y: Math.random()*height, vx:0, vy:0, op:0.035+Math.random()*0.045, seed:Math.random()*9999 });
+    }
+  }
+  function globalFieldForce(p){
+    let fx = 0, fy = 0;
+    for (const t of nodes){
+      if (!matchFilter(t)) continue;
+      const dx = t.wx - p.x, dy = t.wy - p.y;
+      const dist = Math.max(1, Math.sqrt(dx*dx + dy*dy));
+      const R = t.fieldRadius || 380;
+      if (dist > R) continue;
+      const falloff = (1 - dist / R);
+      let influence = falloff * (t.fieldStrength || 1.0);
+      if (t.status === 'ausente') influence *= -1.35;
+      const wobble = Math.sin(time*0.004 + p.seed + dist*0.01) * 0.008;
+      fx += (dx / dist) * influence * 0.06 + (-dy / dist) * wobble;
+      fy += (dy / dist) * influence * 0.06 + ( dx / dist) * wobble;
+    }
+    return {fx, fy};
+  }
+  function updateAmbient(){
+    const damping = 0.93;
+    const aScale = (activeLens === 'all' ? 0.55 : 1.05) * (0.70 + market*0.55);
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; // aumentado para melhor visibilidade
+    for (const p of ambient){
+      const f = globalFieldForce(p);
+      p.vx += f.fx; p.vy += f.fy;
+      p.vx *= damping; p.vy *= damping;
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < -20) p.x = width + 20;
+      if (p.x > width + 20) p.x = -20;
+      if (p.y < -20) p.y = height + 20;
+      if (p.y > height + 20) p.y = -20;
+      ctx.globalAlpha = p.op * aScale;
+      ctx.fillRect(p.x, p.y, 1, 1);
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  // ===== Extraction beams (always-on; lens changes legibility) =====
+  function drawBeams(){
+    const weights = getVisibilityWeights();
+    const { forward, reverse } = getActivePairs();
+
+    const intensity = 0.18 + market * 0.92;
+    const baseA = 0.030 * intensity;
+
+    // hint
+    const sel = (selectedNodeId !== null) ? nodes.find(n => n.id === selectedNodeId) : null;
+    hintBadge.textContent = sel
+      ? `FIXADO: ${sel.region.toUpperCase()} • CLIQUE NO VAZIO PARA SOLTAR`
+      : `ARRASTE PARA NAVEGAR • SCROLL PARA ZOOM • FILTROS REVELAM (NÃO DESLIGAM)`;
+
+    // Forward: sources -> sinks (europa + latência)
+    for (const s of forward.sources){
+      for (const d of forward.sinks){
+        const kind = (s.resource === 'dados') ? 'dados' : s.resource;
+        const w = weights[kind] ?? 0.2;
+        if (w <= 0.001) continue;
+
+        // style
+        ctx.lineWidth = 1.05;
+        ctx.strokeStyle = `rgba(255,255,255,${baseA * w})`;
+        ctx.beginPath();
+        ctx.moveTo(s.wx,s.wy);
+        ctx.lineTo(d.wx,d.wy);
+        ctx.stroke();
+
+        // dots
+        const dots = 1 + (w > 0.6 ? 2 : 1) + (market > 0.68 ? 1 : 0);
+        for (let i=0;i<dots;i++){
+          const phase = (time*0.004 + i*0.37 + (s.magnitude||0.8)*0.9) % 1;
+          const px = s.wx + (d.wx-s.wx)*phase;
+          const py = s.wy + (d.wy-s.wy)*phase;
+
+          ctx.globalAlpha = 0.38 * intensity * w;
+          ctx.drawImage(haloSprite, px-16, py-16, 32, 32);
+          ctx.globalAlpha = 0.70 * intensity * w;
+          ctx.fillStyle = 'rgba(255,255,255,1)';
+          ctx.beginPath(); ctx.arc(px,py,1.5,0,Math.PI*2); ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+
+        // damage: water/minerals always drain; lens makes it more visible, but effect exists
+        if (s.id !== undefined && (s.resource === 'agua' || s.resource === 'minerais')){
+          const dmgBase = (s.resource === 'agua') ? 0.00075 : 0.00055;
+          const dmg = dmgBase * intensity * (0.55 + exposure*0.45) * (0.35 + 0.65*w);
+          damage(s.id, dmg);
+        }
+      }
+    }
+
+    // Reverse overlay: (europa+latência) -> ewaste
+    const ew = weights.ewaste ?? 0.25;
+    if (ew > 0.02){
+      ctx.lineWidth = 0.9;
+      ctx.strokeStyle = `rgba(255,255,255,${baseA * ew * 0.65})`;
+      for (const s of reverse.sources){
+        for (const d of reverse.sinks){
+          ctx.beginPath();
+          ctx.moveTo(s.wx,s.wy);
+          ctx.lineTo(d.wx,d.wy);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // ===== Info panel =====
+  const infoPanel = document.getElementById('infoPanel');
+  const infoTitle = document.getElementById('infoTitle');
+  const infoMeta = document.getElementById('infoMeta');
+  const infoStatus = document.getElementById('infoStatus');
+  const infoDoc = document.getElementById('infoDoc');
+  const infoText = document.getElementById('infoText');
+  const pillRow = document.getElementById('pillRow');
+
+  function showInfo(t){
+    infoTitle.textContent = t.region || '—';
+    infoStatus.textContent = (t.status || '—').toUpperCase();
+    infoDoc.textContent = t.doc ? (t.doc + (t.year ? ` • ${t.year}` : '')) : '—';
+    infoMeta.textContent = `${(t.resource||'—').toUpperCase()} • ${(t.axis||'—').toUpperCase()} • ${t.source || '—'}`;
+    infoText.textContent = t.notes || '—';
+    pillRow.innerHTML = '';
+    const h = (t.id !== undefined) ? getHealth(t.id) : 1.0;
+    const pills = [
+      `MAGNITUDE ${(t.magnitude ?? 0).toFixed(2)}`,
+      `EVIDÊNCIAS ${(t.papers ?? 0)}`,
+      (t.status === 'ausente' ? 'DADO AUSENTE' : 'DADO PRESENTE'),
+      (t.resource === 'agua' || t.resource === 'minerais') ? `NATUREZA ${(h*100).toFixed(0)}%` : ''
+    ].filter(Boolean);
+    for (const s of pills){
+      const d = document.createElement('div');
+      d.className = 'pill';
+      d.textContent = s;
+      pillRow.appendChild(d);
+    }
+    infoPanel.classList.add('visible');
+  }
+  function hideInfo(){ infoPanel.classList.remove('visible'); }
+
+  function findNearbyNode(worldX, worldY){
+    const thr = 56;
+    let best = null, bestD = Infinity;
+    for (const t of nodes){
+      const dx = t.wx - worldX;
+      const dy = t.wy - worldY;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < thr && d < bestD){ best = t; bestD = d; }
+    }
+    return best;
+  }
+
+  // ===== Filters become LENSES =====
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeLens = btn.dataset.filter;
+      document.getElementById('statusText').textContent = `LENTE: ${btn.textContent.toUpperCase()} (CADEIA CONTINUA ATIVA)`;
+      selectedNodeId = null;
+      setTargetsFromLens(); rebuildCaches();
+    });
+  });
+
+  // ===== Controls =====
+  exposureEl.addEventListener('input', () => {
+    exposure = parseFloat(exposureEl.value);
+    expValEl.textContent = exposure.toFixed(2) + '×';
+    initAmbient(); initCores(); setTargetsFromLens(); rebuildCaches();
+  }, { passive:true });
+
+  memoryEl.addEventListener('input', () => {
+    memory = parseFloat(memoryEl.value);
+    memValEl.textContent = memory.toFixed(2);
+  }, { passive:true });
+
+  // ===== Mouse =====
+  let lastHover = 0;
+  canvas.addEventListener('mousemove', (e) => {
+    mouseSX = e.clientX; mouseSY = e.clientY;
+    const lat = ((e.clientY / height) * 180 - 90).toFixed(0);
+    const lon = ((e.clientX / width) * 360 - 180).toFixed(0);
+    document.getElementById('coordinates').textContent =
+      `${Math.abs(lat)}°00'00"${lat >= 0 ? 'N' : 'S'}  ${Math.abs(lon)}°00'00"${lon >= 0 ? 'E' : 'W'}`;
+
+    const now = performance.now();
+    if (now - lastHover < 45) return;
+    lastHover = now;
+    const w = worldFromScreen(e.clientX, e.clientY);
+    const t = findNearbyNode(w.x, w.y);
+    if (t) showInfo(t); else hideInfo();
+  }, { passive:true });
+
+  // lock/unlock
+  canvas.addEventListener('click', (e) => {
+    const w = worldFromScreen(e.clientX, e.clientY);
+    const t = findNearbyNode(w.x, w.y);
+    selectedNodeId = t ? t.id : null;
+  });
+
+  // drag map (2D pan apenas - sem atravessar objetos)
+  canvas.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    canvas.classList.add('dragging');
+    dragStartX = e.clientX; dragStartY = e.clientY;
+    camStartX = camX; camStartY = camY;
+  });
+  window.addEventListener('mouseup', () => { 
+    isDragging = false; 
+    canvas.classList.remove('dragging');
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const newCamX = camStartX + (e.clientX - dragStartX);
+    const newCamY = camStartY + (e.clientY - dragStartY);
+    // Limitar pan para não se perder
+    const maxPan = Math.max(width, height) * 0.8;
+    camX = Math.max(-maxPan, Math.min(maxPan, newCamX));
+    camY = Math.max(-maxPan, Math.min(maxPan, newCamY));
+  }, { passive:true });
+
+  // zoom (cursor-centered)
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const before = worldFromScreen(e.clientX, e.clientY);
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    zoom = Math.max(0.6, Math.min(2.4, zoom * factor));
+    const after = worldFromScreen(e.clientX, e.clientY);
+    camX += (after.x - before.x) * zoom;
+    camY += (after.y - before.y) * zoom;
+  }, { passive:false });
+
+  document.getElementById('zoomIn').addEventListener('click', () => { zoom = Math.min(2.4, zoom * 1.1); });
+  document.getElementById('zoomOut').addEventListener('click', () => { zoom = Math.max(0.6, zoom * 0.9); });
+
+  // ===== Auto sweep =====
+  const sweepOrder = ['all','energia','agua','minerais','latencia','governanca','ewaste','ausencia'];
+  let sweepIdx = 0;
+  let lastSweep = performance.now();
+
+  function tickAuto(){
+    if (!autoSweepEl.checked) return;
+    const now = performance.now();
+    if (now - lastSweep < 6500) return;
+    lastSweep = now;
+    sweepIdx = (sweepIdx + 1) % sweepOrder.length;
+    activeLens = sweepOrder[sweepIdx];
+    selectedNodeId = null;
+    setTargetsFromLens(); rebuildCaches();
+    document.querySelectorAll('.filter-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === activeLens);
+      if (b.dataset.filter === activeLens){
+        document.getElementById('statusText').textContent = `LENTE: ${b.textContent.toUpperCase()} (CADEIA CONTINUA ATIVA)`;
+      }
+    });
+  }
+
+  function clearFrame(){
+    const baseAlpha = (1 - memory);
+    resetTransform();
+    ctx.fillStyle = `rgba(10,10,10,${Math.min(0.45, Math.max(0.08, baseAlpha))})`;
+    ctx.fillRect(0,0,width,height);
+  }
+
+  // ===== Loop =====
+  // ===== Luz (suave + direção intuitiva) =====
+  function animate(){
+
+
+  function stepAutoWidgets(){
+    exposure += (expTarget - exposure) * 0.03;
+    memory   += (memTarget - memory) * 0.02;
+    exposureEl.value = exposure.toFixed(2);
+    memoryEl.value   = memory.toFixed(2);
+    expValEl.textContent = exposure.toFixed(2) + '×';
+    memValEl.textContent = memory.toFixed(2);
+  }
+    clearFrame();
+    applyCamera();
+
+    stepAutoWidgets();
+    marketStep();
+    renderMarketUI();
+
+    drawDominanceFieldCached();
+    drawConnectionsMaybe();
+
+    // always-on chains; lens changes legibility
+    drawBeams();
+
+    updateAmbient();
+    for (const p of particles){ p.update(); p.draw(); }
+
+    recoverAll();
+
+    time++;
+    tickAuto();
+    requestAnimationFrame(animate);
+  }
+
+  function init(){
+    // recompute world positions on resize
+    nodes = territories.map((t, idx) => ({ ...t, id: idx, wx: t.x*width, wy: t.y*height }));
+    initAmbient();
+    initCores();
+    setTargetsFromLens(); rebuildCaches();
+  }
+
+  resizeCanvas();
+  init();
+  animate();
+</script>
+</body>
+</html>
